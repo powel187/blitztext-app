@@ -1,0 +1,64 @@
+name: Build macOS Artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      configuration:
+        description: Build configuration
+        type: choice
+        default: Release
+        options:
+          - Release
+          - Debug
+
+permissions:
+  contents: read
+
+jobs:
+  build-artifact:
+    name: Build downloadable app
+    runs-on: macos-14
+    timeout-minutes: 45
+
+    env:
+      BUILD_CONFIGURATION: ${{ inputs.configuration }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.2.app || sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Install XcodeGen
+        run: |
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+
+      - name: Build app
+        run: |
+          if [ "$BUILD_CONFIGURATION" = "Debug" ]; then
+            ./build.sh --debug
+          else
+            ./build.sh --release
+          fi
+
+      - name: Package app bundle
+        run: |
+          short_sha="${GITHUB_SHA::7}"
+          artifact_name="Blitztext-${BUILD_CONFIGURATION}-${short_sha}"
+
+          mkdir -p artifacts
+          ditto -c -k --sequesterRsrc --keepParent Blitztext.app "artifacts/${artifact_name}.zip"
+          shasum -a 256 "artifacts/${artifact_name}.zip" | tee "artifacts/${artifact_name}.zip.sha256"
+
+      - name: Upload app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Blitztext-${{ env.BUILD_CONFIGURATION }}-${{ github.run_number }}
+          path: |
+            artifacts/*.zip
+            artifacts/*.sha256
+          if-no-files-found: error
+          retention-days: 14
